@@ -1,0 +1,58 @@
+FROM elixir:1.8.2-alpine
+
+# Install postgresql
+RUN \
+  apk add postgresql &&\
+  mkdir /var/lib/postgresql/data &&\
+  mkdir /run/postgresql &&\
+  chown -R postgres:postgres /var/lib/postgresql &&\
+  chown -R postgres:postgres /run/postgresql
+
+## Init postgresql data
+USER postgres
+RUN \
+	initdb -D /var/lib/postgresql/data &&\
+	pg_ctl start -D /var/lib/postgresql/data &&\
+	psql -c "ALTER USER postgres PASSWORD 'postgres';" &&\
+	pg_ctl stop -D /var/lib/postgresql/data
+
+## Set startup postgresql
+USER root
+RUN \
+	apk add openrc &&\
+	mkdir /run/openrc &&\
+	touch /run/openrc/softlevel &&\
+  touch /etc/local.d/postgresql.start &&\
+  chmod +x /etc/local.d/postgresql.start &&\
+  echo "#! /bin/sh" >> /etc/local.d/postgresql.start &&\
+  echo "su postgres -c 'pg_ctl start -D /var/lib/postgresql/data'" >> /etc/local.d/postgresql.start &&\
+  rc-update add local boot &&\
+	openrc
+
+# Pull reticulum
+USER root
+EXPOSE 4000 5432
+
+ENTRYPOINT \
+  # Git clone
+  apk add git &&\
+  git clone https://github.com/mozilla/reticulum.git /home/reticulum &&\
+  # Initialize
+  cd /home/reticulum &&\
+  mix local.hex --force &&\
+  mix deps.get &&\
+  mix local.rebar --force &&\
+  mkdir storage &&\
+  mkdir storage/dev &&\
+  # Execute server
+  service local start &&\
+  mix ecto.create &&\
+  iex -S mix phx.server
+
+USER root
+EXPOSE 4000 5432
+
+WORKDIR /home/reticulum
+CMD \
+  service local start &&\
+  iex -S mix phx.server
